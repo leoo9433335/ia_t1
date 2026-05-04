@@ -1,222 +1,175 @@
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
 import random
+from itertools import combinations
 
-# ==================== CONFIGURAÇÃO ====================
-CLASSE_MAPEAMENTO = {
-    0: "Tem jogo",
-    1: "X venceu",
-    2: "O venceu",
-    3: "Empate"
-}
+import pandas as pd
 
-random.seed(42)
-np.random.seed(42)
+SEED = 42
+N_PER_CLASSE = 200
 
-# =========================
-# 🧠 REGRAS DO JOGO
-# =========================
+LINHAS_VITORIA = [
+    (0, 1, 2), (3, 4, 5), (6, 7, 8),
+    (0, 3, 6), (1, 4, 7), (2, 5, 8),
+    (0, 4, 8), (2, 4, 6),
+]
 
-def check_win(board):
-    lines = [
-        [0,1,2], [3,4,5], [6,7,8],
-        [0,3,6], [1,4,7], [2,5,8],
-        [0,4,8], [2,4,6]
-    ]
-    for line in lines:
-        values = [board[i] for i in line]
-        if values == [1,1,1]:
+CLASSES = {0: "tem_jogo", 1: "x_venceu", 2: "o_venceu", 3: "empate"}
+
+COLUNAS_FEATURES = [f"pos_{i}" for i in range(9)]
+COLUNAS = COLUNAS_FEATURES + ["class"]
+
+
+def vencedor(b):
+    for i, j, k in LINHAS_VITORIA:
+        s = b[i] + b[j] + b[k]
+        if s == 3:
             return 1
-        elif values == [-1,-1,-1]:
+        if s == -3:
             return 2
     return 0
 
-def classificar_estado(board):
-    win = check_win(board)
-    has_blank = 0 in board
-    
-    if win == 1:
-        return 1
-    elif win == 2:
-        return 2
-    elif not has_blank:
-        return 3
-    else:
-        return 0
 
-# =========================
-# 🔥 GERAR ESTADOS VÁLIDOS (MELHORADO)
-# =========================
+def rotular(b):
+    v = vencedor(b)
+    if v:
+        return v
+    return 0 if 0 in b else 3
 
-def gerar_estados_validos(n=200):
+
+def carregar_uci(path="tic-tac-toe.data"):
+    df = pd.read_csv(path, header=None)
+    m = {"x": 1, "o": -1, "b": 0}
+    return df.iloc[:, :9].apply(lambda c: c.map(m)).values.tolist()
+
+
+def simular_partida(rng):
+    # Joga uma partida válida X-O-X-... escolhendo casas aleatórias
+    # e devolve os estados intermediários (sem vencedor, com casa vazia).
+    b = [0] * 9
+    casas = list(range(9))
+    rng.shuffle(casas)
     estados = []
-
-    while len(estados) < n:
-        board = [0] * 9
-        jogador = 1
-
-        # 🔥 ESSENCIAL: número aleatório de jogadas
-        num_jogadas = random.randint(1, 9)
-
-        for _ in range(num_jogadas):
-            livres = [i for i in range(9) if board[i] == 0]
-            if not livres:
-                break
-
-            pos = random.choice(livres)
-            board[pos] = jogador
-
-            # valida: diferença entre X e O no máximo 1
-            if abs(board.count(1) - board.count(-1)) > 1:
-                break
-
-            # se alguém ganhou, parar
-            if check_win(board) != 0:
-                break
-
-            jogador *= -1
-
-        estados.append(board.copy())
-
+    turno = 1
+    for c in casas:
+        b[c] = turno
+        if vencedor(b):
+            break
+        if 0 in b:
+            estados.append(tuple(b))
+        turno = -turno
     return estados
-# =========================
-# 🧠 FEATURE ENGINEERING (NOVO)
-# =========================
 
-def add_features(df):
-    df = df.copy()
-    df["count_X"] = (df.iloc[:, :9] == 1).sum(axis=1)
-    df["count_O"] = (df.iloc[:, :9] == -1).sum(axis=1)
-    df["diff"] = df["count_X"] - df["count_O"]
-    return df
 
-print("=" * 70)
-print("PROCESSAMENTO DATASET - TIC TAC TOE (VERSÃO PROFISSIONAL)")
-print("=" * 70)
+def gerar_tem_jogo(n, seed=SEED):
+    rng = random.Random(seed)
+    pool = set()
+    while len(pool) < n * 5 and len(pool) < 50_000:
+        for s in simular_partida(rng):
+            pool.add(s)
+    out = [list(t) for t in pool]
+    rng.shuffle(out)
+    return out[:n]
 
-# =========================
-# 📥 CARREGAR DATASET ORIGINAL
-# =========================
 
-print("\n[1] Carregando dataset original...")
-df = pd.read_csv('tic-tac-toe.data', header=None)
+def gerar_empates():
+    # Enumera tabuleiros cheios sem três em linha. C(9,5)=126 disposições para
+    # X; só 16 não têm vencedor. O caso 4X+5O é matematicamente equivalente
+    # (jogo onde O começa) e dá outras 16 disposições válidas. Total base: 32.
+    out = []
+    for n_x in (4, 5):
+        for x_pos in combinations(range(9), n_x):
+            b = [-1] * 9
+            for p in x_pos:
+                b[p] = 1
+            if not vencedor(b):
+                out.append(b)
+    return out
 
-mapping = {'x': 1, 'o': -1, 'b': 0}
-df_features = df.iloc[:, :9].apply(lambda x: x.map(mapping))
 
-new_data = []
+def dedup(lista):
+    return [list(t) for t in {tuple(b) for b in lista}]
 
-for _, row in df_features.iterrows():
-    board = row.values.tolist()
-    label = classificar_estado(board)
-    new_data.append(board + [label])
 
-print(f"    ✓ Dados originais: {len(new_data)}")
+def split_estratificado(df, frac_treino=0.70, frac_val=0.15, seed=SEED):
+    treino, val, teste = [], [], []
+    for c in [0, 1, 2, 3]:
+        sub = df[df["class"] == c].sample(frac=1, random_state=seed + 1).reset_index(drop=True)
+        n = len(sub)
+        n_t = round(n * frac_treino)
+        n_v = round(n * frac_val)
+        treino.append(sub.iloc[:n_t])
+        val.append(sub.iloc[n_t:n_t + n_v])
+        teste.append(sub.iloc[n_t + n_v:])
+    treino = pd.concat(treino).sample(frac=1, random_state=seed + 2).reset_index(drop=True)
+    val = pd.concat(val).sample(frac=1, random_state=seed + 3).reset_index(drop=True)
+    teste = pd.concat(teste).sample(frac=1, random_state=seed + 4).reset_index(drop=True)
+    return treino, val, teste
 
-# =========================
-# 🔥 GERAR DADOS VÁLIDOS
-# =========================
 
-print("\n[2] Gerando estados válidos adicionais...")
-novos_estados = gerar_estados_validos(200)
+def montar_dataset():
+    uci = carregar_uci()
+    print(f"UCI: {len(uci)} linhas")
 
-for board in novos_estados:
-    label = classificar_estado(board)
-    new_data.append(board + [label])
+    pools = {0: [], 1: [], 2: [], 3: []}
+    for b in uci:
+        pools[rotular(b)].append(b)
+    print("Após reclassificar UCI:")
+    for c, lst in pools.items():
+        print(f"  {c} {CLASSES[c]}: {len(lst)}")
 
-# Criar DataFrame
-new_df = pd.DataFrame(
-    new_data,
-    columns=[f'pos_{i}' for i in range(9)] + ['class']
-)
+    # UCI só tem fim de jogo, então tem_jogo precisa ser gerado.
+    # Geramos por simulação de partidas válidas para garantir que os
+    # estados sejam alcançáveis num jogo real (X joga primeiro e alterna).
+    pools[0].extend(gerar_tem_jogo(N_PER_CLASSE * 2))
 
-# Remover duplicatas
-new_df = new_df.drop_duplicates()
+    # Empates do UCI são poucos. Enumera todos os 5X+4O sem 3-em-linha.
+    pools[3].extend(gerar_empates())
 
-# =========================
-# 📊 DISTRIBUIÇÃO ORIGINAL
-# =========================
+    for c in pools:
+        pools[c] = dedup(pools[c])
 
-print("\n[3] Distribuição antes do balanceamento:")
-print(new_df['class'].value_counts())
+    # Por garantia, evita que o mesmo tabuleiro caia em duas classes.
+    visto = {}
+    for c in [1, 2, 3, 0]:
+        for b in pools[c]:
+            visto.setdefault(tuple(b), c)
+    pools = {0: [], 1: [], 2: [], 3: []}
+    for tup, c in visto.items():
+        pools[c].append(list(tup))
 
-# =========================
-# ⚖️ BALANCEAMENTO MELHORADO
-# =========================
+    print("Pool após dedup global:")
+    for c, lst in pools.items():
+        print(f"  {c} {CLASSES[c]}: {len(lst)}")
 
-print("\n[4] Balanceamento inteligente...")
+    rng = random.Random(SEED)
+    linhas = []
+    for c in [0, 1, 2, 3]:
+        pool = pools[c][:]
+        rng.shuffle(pool)
+        n = min(N_PER_CLASSE, len(pool))
+        if n < N_PER_CLASSE:
+            print(f"  AVISO: classe {c} ({CLASSES[c]}) com {n} amostras")
+        for b in pool[:n]:
+            linhas.append(b + [c])
 
-class_counts = new_df['class'].value_counts()
-target_size = class_counts.max()
+    return pd.DataFrame(linhas, columns=COLUNAS)
 
-balanced_list = []
 
-for c in class_counts.index:
-    df_class = new_df[new_df['class'] == c]
-    
-    if len(df_class) < target_size:
-        df_class = df_class.sample(target_size, replace=True, random_state=42)
-    else:
-        df_class = df_class.sample(target_size, random_state=42)
-    
-    balanced_list.append(df_class)
+if __name__ == "__main__":
+    df = montar_dataset()
+    df.to_csv("tic-tac-toe_balanced.csv", index=False)
+    print(f"\nDataset balanceado: {len(df)} amostras")
+    print(df["class"].value_counts().sort_index().to_dict())
 
-balanced_df = pd.concat(balanced_list)
-balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    treino, val, teste = split_estratificado(df)
+    treino.to_csv("train.csv", index=False)
+    val.to_csv("validation.csv", index=False)
+    teste.to_csv("test.csv", index=False)
 
-print("\nDistribuição após balanceamento:")
-print(balanced_df['class'].value_counts())
+    for nome, d in [("treino", treino), ("validação", val), ("teste", teste)]:
+        print(f"  {nome}: {len(d)}  {d['class'].value_counts().sort_index().to_dict()}")
 
-# =========================
-# 🧠 FEATURE ENGINEERING
-# =========================
-
-balanced_df = add_features(balanced_df)
-
-# =========================
-# ✂️ SPLIT TREINO / VAL / TESTE
-# =========================
-
-print("\n[5] Dividindo dataset...")
-
-X = balanced_df.drop(columns=["class"])
-y = balanced_df["class"]
-
-X_train, X_temp, y_train, y_temp = train_test_split(
-    X, y, test_size=0.3, stratify=y, random_state=42
-)
-
-X_val, X_test, y_val, y_test = train_test_split(
-    X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=42
-)
-
-train_df = pd.concat([X_train.reset_index(drop=True), y_train.reset_index(drop=True)], axis=1)
-val_df = pd.concat([X_val.reset_index(drop=True), y_val.reset_index(drop=True)], axis=1)
-test_df = pd.concat([X_test.reset_index(drop=True), y_test.reset_index(drop=True)], axis=1)
-
-# =========================
-# 💾 SALVAR
-# =========================
-
-train_df.to_csv('train_32.csv', index=False)
-val_df.to_csv('validation_32.csv', index=False)
-test_df.to_csv('test_32.csv', index=False)
-
-print(f"\nTreino: {len(train_df)}")
-print(f"Validação: {len(val_df)}")
-print(f"Teste: {len(test_df)}")
-
-# =========================
-# 📊 DISTRIBUIÇÃO FINAL
-# =========================
-
-print("\n[6] Distribuição final:")
-
-for nome, df_split in [("Treino", train_df), ("Validação", val_df), ("Teste", test_df)]:
-    print(f"\n{nome}:")
-    print(df_split['class'].value_counts())
-
-print("\n" + "=" * 70)
-print("✓ DATASET PRONTO PARA TREINAMENTO (VERSÃO FORTE)")
-print("=" * 70)
+    erros = sum(
+        rotular(row[COLUNAS_FEATURES].tolist()) != row["class"]
+        for _, row in df.iterrows()
+    )
+    print(f"\nInconsistências rótulo vs regra: {erros}")

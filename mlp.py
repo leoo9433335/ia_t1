@@ -3,15 +3,16 @@ import joblib
 
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report, accuracy_score
+from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 # =========================
 # 📥 Carregar datasets
 # =========================
-train_df = pd.read_csv('train_32.csv')
-val_df = pd.read_csv('validation_32.csv')
-test_df = pd.read_csv('test_32.csv')
+train_df = pd.read_csv('train.csv')
+val_df = pd.read_csv('validation.csv')
+test_df = pd.read_csv('test.csv')
 
 X_train = train_df.iloc[:, :9]
 y_train = train_df['class']
@@ -34,13 +35,7 @@ y_train_val = pd.concat([y_train, y_val])
 pipeline = Pipeline([
     ('scaler', StandardScaler()),
     ('mlp', MLPClassifier(
-        hidden_layer_sizes=(32,),
-        activation='relu',
-        solver='adam',
-        alpha=0.0001,
-        batch_size=32,
-        learning_rate='constant',
-        max_iter=500,
+        max_iter=2000,
         random_state=42,
         early_stopping=True,
         validation_fraction=0.2,
@@ -49,14 +44,43 @@ pipeline = Pipeline([
 ])
 
 # =========================
-# 🚀 Treinar modelo
+# ⚙️ Grid de hiperparâmetros
 # =========================
-pipeline.fit(X_train_val, y_train_val)
+param_grid = {
+    'mlp__hidden_layer_sizes': [
+        (32,), (64,), (100,),
+        (64, 32), (100, 50)
+    ],
+    'mlp__activation': ['relu', 'tanh'],
+    'mlp__solver': ['adam', 'sgd'],
+    'mlp__alpha': [0.0001, 0.001, 0.01, 0.1],
+    'mlp__learning_rate': ['constant', 'adaptive'],
+    'mlp__batch_size': [16, 32, 64]
+}
+
+# =========================
+# 🔍 GridSearch
+# =========================
+grid = GridSearchCV(
+    pipeline,
+    param_grid,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=2
+)
+
+grid.fit(X_train_val, y_train_val)
+
+print("\nMelhores parâmetros:")
+print(grid.best_params_)
 
 # =========================
 # 🧪 Avaliação final
 # =========================
-y_test_pred = pipeline.predict(X_test)
+best_model = grid.best_estimator_
+
+y_test_pred = best_model.predict(X_test)
 
 print("\nTeste:")
 print(classification_report(y_test, y_test_pred))
@@ -65,4 +89,4 @@ print(f"Acurácia: {accuracy_score(y_test, y_test_pred):.4f}")
 # =========================
 # 💾 Salvar modelo
 # =========================
-joblib.dump(pipeline, 'mlp_model.pkl')
+joblib.dump(best_model, 'mlp_model.pkl')
