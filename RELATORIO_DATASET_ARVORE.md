@@ -4,53 +4,19 @@ Documento curto com o que foi feito no dataset e como a árvore de decisão func
 
 ---
 
-## Parte 1 — O dataset
+## Part 1 - O que mudei
 
-### Origem
+- Os nomes de variáveis e arquivos contendo o sufixo 32 foram removidos (incluindo o nome das colunas pos_32_*, ajustadas para pos_*), uma vez que esse identificador não consta no enunciado oficial do trabalho. A alteração foi propagada também aos demais arquivos que liam ou geravam esses nomes (como o builder de dataset e os CSVs treino/validação/teste), mantendo a consistência do projeto.                                                                                                                
 
-Dataset UCI **Tic-Tac-Toe Endgame** (https://archive.ics.uci.edu/dataset/101).
-- 958 instâncias.
-- Cada instância é um tabuleiro 3×3.
-- Original tem só 2 rótulos: `positive` (X venceu) e `negative` (X não venceu).
+- A função estado_real(board) foi adicionada para calcular a classe verdadeira do tabuleiro a partir das regras do jogo, servindo como referência para validar a predição do modelo a cada jogada.                                  
 
-### Problemas encontrados no dataset original
+- A cada turno, a previsão da IA é comparada com o estado real e contabilizada como acerto ou erro. O score corrente é exibido durante a partida e o score final ao término, em formato de fração e percentual.                                                                                                                                         
 
-1. **Só tem 2 classes**, mas o trabalho pede 4 (Tem jogo, X venceu, O venceu, Empate).
-   `negative` mistura "O venceu" e "Empate" no mesmo rótulo.
-2. **Só tem estados de fim de jogo** (tabuleiros com 5 X + 4 O).
-   Não existe nenhuma instância de "Tem jogo" (jogo em andamento).
-3. **Distribuição enviesada** (~65% positive, 35% negative).
+- O fim do jogo passou a ser controlado pelo estado real do tabuleiro, conforme a regra do enunciado: a partida é encerrada quando o jogo de fato termina, mesmo que a IA não detecte; e segue normalmente quando a IA aponta um fim incorretamente.
 
-### O que foi feito (passo a passo)
+- Um dos jogadores foi convertido em máquina com jogadas aleatórias (humano joga como X, máquina como O), implementando a interação humano vs. máquina exigida pelo enunciado. A escolha de cada jogada da máquina é feita por amostragem uniforme entre as casas livres do tabuleiro.                                                        
 
-Tudo está no `main.py`. Resumo do pipeline:
-
-| Passo | O que faz | Resultado |
-|---|---|---|
-| 1 | Lê o UCI bruto e converte X/O/vazio para 1/-1/0 | 958 linhas com encoding numérico |
-| 2 | Re-rotula cada linha lendo o tabuleiro (regra do jogo) | Separa `o_venceu` de `empate` corretamente |
-| 3 | Gera estados de `tem_jogo` simulando partidas válidas | 400 estados intermediários alcançáveis |
-| 4 | Enumera todos os empates possíveis (5X+4O e 4X+5O sem 3-em-linha) | 32 empates únicos |
-| 5 | Remove duplicatas dentro e entre classes | Pool limpo |
-| 6 | Balanceia em ~200 amostras por classe | 200/200/200/32 |
-| 7 | Divide fisicamente em treino/validação/teste (70/15/15 estratificado) | Splits prontos |
-
-### Detalhes importantes
-
-**Como a classe `tem_jogo` foi gerada:** simulação de partidas válidas. Começa com tabuleiro vazio, joga X, depois O, depois X... a cada jogada salva o estado atual se ainda não há vencedor e há casa vazia. Isso garante que todo estado seja **alcançável num jogo real**, não um tabuleiro inventado (ex: 7 X's e 0 O's, que nunca acontece).
-
-**Por que só 32 empates?** Existem `C(9,5) = 126` formas de distribuir 5 X's no tabuleiro. Dessas, **só 16** não formam três em linha (de X ou de O). Somando o caso simétrico 4X+5O, total = **32 empates únicos no universo**. Não é falha do dataset — é uma propriedade matemática do jogo da velha 3×3. Por isso o enunciado deixou aberto: "200 amostras de cada classe, **quando possível**".
-
-### Resultado final
-
-- **Total: 632 amostras**
-- 200 tem_jogo, 200 x_venceu, 200 o_venceu, 32 empate
-- Split: 442 treino / 95 validação / 95 teste (estratificado)
-- 0 inconsistências (todo rótulo bate com a regra do jogo)
-
-Arquivos gerados:
-- `tic-tac-toe_balanced.csv` — dataset completo
-- `train.csv`, `validation.csv`, `test.csv` — splits físicos
+- A leitura do input do humano foi extraída para a função jogada_humano, e a jogada aleatória para jogada_maquina, mantendo o loop principal mais legível.                  
 
 ---
 
@@ -77,13 +43,15 @@ A "impureza" é medida com **Gini** ou **entropia** (são duas fórmulas diferen
 
 ### Hiperparâmetros tunados
 
-| Parâmetro | Valores testados | O que controla |
-|---|---|---|
-| `criterion` | gini, entropy | Como medir a impureza |
-| `max_depth` | None, 4, 6, 8, 10, 15 | Profundidade máxima da árvore (controla overfitting) |
-| `min_samples_split` | 2, 5, 10 | Mínimo de amostras para dividir um nó |
-| `min_samples_leaf` | 1, 2, 5 | Mínimo de amostras numa folha |
-| `class_weight` | None, balanced | `balanced` dá mais peso à classe `empate` (que é minoritária) |
+
+| Parâmetro           | Valores testados      | O que controla                                                |
+| ------------------- | --------------------- | ------------------------------------------------------------- |
+| `criterion`         | gini, entropy         | Como medir a impureza                                         |
+| `max_depth`         | None, 4, 6, 8, 10, 15 | Profundidade máxima da árvore (controla overfitting)          |
+| `min_samples_split` | 2, 5, 10              | Mínimo de amostras para dividir um nó                         |
+| `min_samples_leaf`  | 1, 2, 5               | Mínimo de amostras numa folha                                 |
+| `class_weight`      | None, balanced        | `balanced` dá mais peso à classe `empate` (que é minoritária) |
+
 
 ### Como o tuning foi feito
 
@@ -103,21 +71,25 @@ Ou seja, a árvore com defaults venceu o tuning. Isso significa que o problema �
 
 ### Resultados no conjunto de teste
 
-| Métrica | Valor |
-|---|---|
-| Acurácia | **0.7474** |
-| Precision (macro) | 0.7496 |
-| Recall (macro) | 0.7167 |
-| F1 (macro) | **0.7306** |
+
+| Métrica           | Valor      |
+| ----------------- | ---------- |
+| Acurácia          | **0.7474** |
+| Precision (macro) | 0.7496     |
+| Recall (macro)    | 0.7167     |
+| F1 (macro)        | **0.7306** |
+
 
 Por classe:
 
-| Classe | Precision | Recall | F1 | Suporte |
-|---|---|---|---|---|
-| tem_jogo | 0.66 | 0.70 | 0.68 | 30 |
-| x_venceu | 0.79 | 0.73 | 0.76 | 30 |
-| o_venceu | 0.81 | 0.83 | 0.82 | 30 |
-| empate | 0.75 | 0.60 | 0.67 | 5 |
+
+| Classe   | Precision | Recall | F1   | Suporte |
+| -------- | --------- | ------ | ---- | ------- |
+| tem_jogo | 0.66      | 0.70   | 0.68 | 30      |
+| x_venceu | 0.79      | 0.73   | 0.76 | 30      |
+| o_venceu | 0.81      | 0.83   | 0.82 | 30      |
+| empate   | 0.75      | 0.60   | 0.67 | 5       |
+
 
 ### Análise rápida
 
@@ -126,6 +98,7 @@ Por classe:
 - Comparando com MLP (acurácia 83.16%), a árvore fica abaixo. Faz sentido: redes neurais capturam padrões não-lineares melhor. Mas a árvore é mais interpretável.
 
 ### Para o PPT, vale incluir
+
 - A configuração escolhida (tabela acima).
 - A matriz de confusão (gerada na célula 5 do notebook).
 - A visualização da árvore (gerada na célula 6).
@@ -143,3 +116,4 @@ python main.py
 jupyter notebook arvore_decisao.ipynb
 # (ou abrir no VS Code/Cursor)
 ```
+
