@@ -43,11 +43,15 @@ def predict_game_state(board):
     # Sem colunas (igual ao treino com iloc)
     input_df = pd.DataFrame([input_numeric])
 
+    #Descomentar o modelo que deseja testar
     prediction = mlp_model.predict(input_df)[0]
+    #prediction = knn_model.predict(input_df)[0]
     return prediction
 
-# 📦 Carregar modelo
+# 📦 Carregar modelo    
+# Descomentar o modelo que deseja testar
 mlp_model = joblib.load('mlp_model.pkl')
+#knn_model = joblib.load('knn_model.pkl')
 
 def tic_tac_toe():
     board = [" " for _ in range(9)]
