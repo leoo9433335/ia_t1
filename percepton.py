@@ -9,9 +9,9 @@ from sklearn.preprocessing import StandardScaler
 # =========================
 # 📥 Carregar datasetsq
 # =========================
-train_df = pd.read_csv('train_32.csv')
-val_df = pd.read_csv('validation_32.csv')
-test_df = pd.read_csv('test_32.csv')
+train_df = pd.read_csv('train.csv')
+val_df = pd.read_csv('validation.csv')
+test_df = pd.read_csv('test.csv')
 
 X_train = train_df.iloc[:, :9]
 y_train = train_df['class']

@@ -199,9 +199,9 @@ test_df = pd.concat([X_test.reset_index(drop=True), y_test.reset_index(drop=True
 # 💾 SALVAR
 # =========================
 
-train_df.to_csv('train_32.csv', index=False)
-val_df.to_csv('validation_32.csv', index=False)
-test_df.to_csv('test_32.csv', index=False)
+train_df.to_csv('train.csv', index=False)
+val_df.to_csv('validation.csv', index=False)
+test_df.to_csv('test.csv', index=False)
 
 print(f"\nTreino: {len(train_df)}")
 print(f"Validação: {len(val_df)}")
